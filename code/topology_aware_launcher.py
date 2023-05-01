@@ -5,7 +5,7 @@ import ast
 import paramiko
 import argparse
 import json
-import mpi
+import mpi_launcher_helper
 
 
 TOPOLOGY_OUTPUT_DIRECTORY = "/opt/ml/code/"
@@ -20,12 +20,12 @@ def compute_topology_mapping():
     hosts.sort()
     if is_master:
         print('master')
-        runner = mpi.MasterRunner("bin/ring_latency_calculator", TOPOLOGY_OUTPUT_DIRECTORY, 1, master_hostname, hosts)
+        runner = mpi_launcher_helper.MasterRunner("bin/ring_latency_calculator", TOPOLOGY_OUTPUT_DIRECTORY, 1, master_hostname, hosts)
         print('master init done')
         runner.run()
     else:
         print('worker')
-        runner = mpi.WorkerRunner(
+        runner = mpi_launcher_helper.WorkerRunner(
             "bin/ring_latency_calculator",
             TOPOLOGY_OUTPUT_DIRECTORY,
             1,
@@ -71,23 +71,28 @@ def construct_ranking(pp_degree, dp_degree, optimize_for_pp, dp_major, count, sp
     return ranking
 
 
-def construct_bad_ranking(count, spine_to_host):
+def construct_bad_ranking(pp_degree, dp_degree, dp_major, count, spine_to_host):
+    assert count == pp_degree * dp_degree, "pp_degree * dp_degree must match number of hosts"
+    if not dp_major:
+        pp_degree, dp_degree = dp_degree, pp_degree
     ranking = ["" for i in range(count)]
-    while count > 0:
-        for spine in spine_to_host:
-            if spine_to_host[spine]:
-                ranking[count - 1] = spine_to_host[spine][0]
-                spine_to_host[spine].pop(0)
-                count -= 1
+    spines = list(spine_to_host.keys())
+    k = 0
+    for i in range(dp_degree):
+        for j in range(pp_degree):
+            while len(spine_to_host[spines[k]]) == 0:
+                k = (k + 1) % len(spines)
+            ranking[i + j * dp_degree] = spine_to_host[spines[k]][0]
+            spine_to_host[spines[k]].pop(0)
+            k = (k + 1) % len(spines)
     return ranking
-
 
 def get_training_info(pp_degree, dp_degree, optimize_for_pp, dp_major, bad_placement):
     spine_to_host, count = read_spine_to_host()
     print(f'Output from topology compute: {spine_to_host} count: {count}')
     my_host = os.environ['SM_CURRENT_HOST']
     if False:
-        ranking = construct_bad_ranking(count, spine_to_host)
+        ranking = construct_bad_ranking(pp_degree, dp_degree, dp_major, count, spine_to_host)
     else:
         ranking = construct_ranking(pp_degree, dp_degree, optimize_for_pp, dp_major, count, spine_to_host)
     print(f'ranking is {ranking}')
@@ -95,7 +100,6 @@ def get_training_info(pp_degree, dp_degree, optimize_for_pp, dp_major, bad_place
     assert my_host in ranking
     rank = ranking.index(my_host)
     return count, master_addr, rank
-
 
 if __name__ == "__main__":
     print('In custom launcher')
