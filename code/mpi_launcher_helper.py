@@ -69,37 +69,14 @@ class WorkerRunner:
         print("Writing environment variables to /etc/environment for the MPI process.")
         _write_env_vars_to_file()
 
-        _start_sshd_daemon()
+        self._sshd = _start_sshd_daemon()
 
         print("Waiting for MPI process to finish.")
         gone, alive = _wait_orted_process_to_finish()
         print(f"Reporting status for ORTEd process. gone: {gone} alive: {alive}")
         print("Orted process exited")
-        # time.sleep(30)
-        # print(f"Begin looking for status file on {self._current_host}")
-        # status_file = MPI_FINISHED_STATUS_FILE + "." + self._master_hostname
-        # file_found = self._wait_for_status_file(status_file)
-        # if file_found:
-        #     print("MPI training job status file found. Exit gracefully")
-        # else:
-        #     print("Status file not found. Exiting...")
-        # print("End looking for status file")
-        print("MPI process finished.")
-
-    def _wait_for_status_file(self, status_file):
-        print('waiting for status file')
-        start_time = time.time()
-        file_found = os.path.exists(status_file)
-        while not file_found:
-            time.sleep(30)
-            curr_time = time.time()
-            # Check connectivity with master every 2 minutes
-            if int(curr_time - start_time) % 120 == 0:
-                print("status file not found...")
-                if not _can_connect(self._master_hostname):
-                    return False
-            file_found = os.path.exists(status_file)
-        return True
+        print("MPI process finished, killing SSHD")
+        self._sshd.kill()
 
     def _wait_master_to_start(self):  # type: () -> None
         while not _can_connect(self._master_hostname):
@@ -135,7 +112,6 @@ def _orted_process():  # pylint: disable=inconsistent-return-statements
             print("Process[es]: %s", procs)
             return procs
         time.sleep(0.01)
-    print("proc not found, returning None")
 
 
 class MasterRunner():
@@ -168,7 +144,7 @@ class MasterRunner():
     def _setup(self):  # type: () -> None
         print("Starting MPI run as master node.")
         print("Creating SSH daemon.")
-        _start_sshd_daemon()
+        self._sshd = _start_sshd_daemon()
 
         self._wait_for_workers()
 
@@ -176,8 +152,6 @@ class MasterRunner():
         print("Waiting for MPI workers to establish their SSH connections")
 
         workers = [host for host in self._hosts if host != self._master_hostname]
-        print(f"workers: {workers}")
-        # with timeout.timeout(seconds=self.timeout_in_seconds):
         for host in workers:
             print(f"master checking connection to {host}")
             while not _can_connect(host):
@@ -198,11 +172,14 @@ class MasterRunner():
             "-np",
             str(num_processes),
             "--allow-run-as-root",
+            "-mca",
+            "orte_abort_on_non_zero_status",
+            "1",
             self._user_entry_point,
             os.getcwd()
         ]
         command = " ".join(command)
-        print(f'created command {command}')
+        print(f'Runnind command: `{command}`')
         return command
 
     async def _run_async(self, cmd, processes_per_host):
@@ -222,7 +199,6 @@ class MasterRunner():
         return rc, proc
 
     def run(self):
-        print('master run called')
         self._setup()
 
         cmd = self._create_command()
@@ -230,20 +206,17 @@ class MasterRunner():
             cmd,
             self._processes_per_host,
         )
-        # process_spawned = subprocess.Popen(cmd, env=os.environ)
-        # return_code = process_spawned.wait()
-        # print(f'master return_code: {return_code}')
+        self._sshd.kill()
         return process_spawned
 
 
 def _start_sshd_daemon():  # type: () -> None
-    print('starting ssh daemon')
     sshd_executable = "/usr/sbin/sshd"
 
     if not os.path.exists(sshd_executable):
         raise RuntimeError("SSH Daemon not found")
-    subprocess.Popen([sshd_executable, "-D"])
-    print('done starting ssh daemon')
+    proc = subprocess.Popen([sshd_executable, "-D"])
+    return proc
 
 
 def _can_connect(host, port=22):  # type: (str, int) -> bool

@@ -6,7 +6,7 @@ import paramiko
 import argparse
 import json
 import mpi_launcher_helper
-
+import psutil
 
 TOPOLOGY_OUTPUT_DIRECTORY = "/opt/ml/code/"
 TOPOLOGY_FILE_NAME = "cluster_topology.txt"
@@ -19,21 +19,21 @@ def compute_topology_mapping():
     hosts = json.loads(os.environ['SM_HOSTS'])
     hosts.sort()
     if is_master:
-        print('master')
-        runner = mpi_launcher_helper.MasterRunner("bin/ring_latency_calculator", TOPOLOGY_OUTPUT_DIRECTORY, 1, master_hostname, hosts)
-        print('master init done')
-        runner.run()
+        runner = mpi_launcher_helper.MasterRunner(
+            user_entry_point="bin/ring_latency_calculator", 
+            user_output_dir=TOPOLOGY_OUTPUT_DIRECTORY, 
+            processes_per_host=1, 
+            master_hostname=master_hostname, 
+            hosts=hosts)
     else:
-        print('worker')
         runner = mpi_launcher_helper.WorkerRunner(
-            "bin/ring_latency_calculator",
-            TOPOLOGY_OUTPUT_DIRECTORY,
-            1,
-            master_hostname,
-            my_host
+            user_entry_point="bin/ring_latency_calculator",
+            user_output_dir=TOPOLOGY_OUTPUT_DIRECTORY,
+            processes_per_host=1,
+            master_hostname=master_hostname,
+            current_host=my_host
         )
-        print('worker init done')
-        runner.run()
+    runner.run()
 
 
 def read_spine_to_host():
@@ -102,7 +102,6 @@ def get_training_info(pp_degree, dp_degree, optimize_for_pp, dp_major, bad_place
     return count, master_addr, rank
 
 if __name__ == "__main__":
-    print('In custom launcher')
     parser = argparse.ArgumentParser()
     parser.add_argument('--pp-degree', type=int, required=True)
     parser.add_argument('--dp-degree', type=int, required=True)

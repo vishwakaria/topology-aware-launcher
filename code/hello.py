@@ -11,5 +11,5 @@ torch.distributed.init_process_group(backend="gloo")
 my_host = os.environ['SM_CURRENT_HOST']
 
 print(f'Hello from host {my_host} rank {dist.get_rank()}')
-time.sleep(5)
+time.sleep(1)
 print('hello.py exiting')
