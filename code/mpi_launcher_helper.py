@@ -36,7 +36,11 @@ class WorkerRunner:
     """
 
     def __init__(
-        self, user_entry_point, user_output_dir, processes_per_host, master_hostname, current_host
+        self, 
+        user_entry_point,  
+        processes_per_host, 
+        master_hostname, 
+        current_host,
     ):
         """Initialize a WorkerRunner, which is responsible for preparing distributed
         training with MPI and waiting for MPI master execution to finish.
@@ -48,7 +52,6 @@ class WorkerRunner:
         """
         print('Init worker runner')
         self._user_entry_point = user_entry_point
-        self._user_output_dir = user_output_dir
         self._processes_per_host = processes_per_host
         self._master_hostname = str(master_hostname)
         self._current_host = str(current_host)
@@ -122,13 +125,15 @@ class MasterRunner():
     def __init__(
         self,
         user_entry_point,
-        user_output_dir,
         processes_per_host,
         master_hostname,
         hosts,
+        training_args=None,
+        user_output_dir=None,
         interval=1,
         timeout_in_seconds=60 * 60,
         num_processes=None,
+        no_python=True
     ):
         print('Init master worker')
         self._user_entry_point = user_entry_point
@@ -136,10 +141,12 @@ class MasterRunner():
         self._processes_per_host = processes_per_host
         self._master_hostname = master_hostname
         self._hosts = hosts
+        self._training_args = training_args
         self._processes_per_host = processes_per_host
         self._num_processes = num_processes
         self._interval = interval
         self.timeout_in_seconds = timeout_in_seconds
+        self._no_python = no_python
 
     def _setup(self):  # type: () -> None
         print("Starting MPI run as master node.")
@@ -161,7 +168,10 @@ class MasterRunner():
     def _create_command(self):
         num_hosts = len(self._hosts)
         num_processes = self._processes_per_host * num_hosts
-        host_list = self._hosts
+        if self._processes_per_host == 1:
+            host_list = self._hosts
+        else:
+            host_list = ["%s:%s" % (host, self._processes_per_host) for host in self._hosts]
         msg = "Env Hosts: %s Hosts: %s process_per_hosts: %s num_processes: %s"
         print(msg, self._hosts, host_list, self._processes_per_host, num_processes)
 
@@ -175,11 +185,22 @@ class MasterRunner():
             "-mca",
             "orte_abort_on_non_zero_status",
             "1",
-            self._user_entry_point,
-            os.getcwd()
+            "-x",
+            "MASTER_ADDR=%s" % self._master_hostname,
         ]
+        if self._no_python:
+            command.extend([self._user_entry_point])
+        else:
+            command.extend(["python", self._user_entry_point])
+
+        if self._user_output_dir:
+            command.extend([self._user_output_dir])
+
+        if self._training_args:
+            command.extend(self._training_args)
+
         command = " ".join(command)
-        print(f'Runnind command: `{command}`')
+        print(f'Running command: `{command}`')
         return command
 
     async def _run_async(self, cmd, processes_per_host):
