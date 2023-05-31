@@ -8,27 +8,41 @@ import json
 import mpi_launcher_helper
 import psutil
 
-TOPOLOGY_OUTPUT_DIRECTORY = "/opt/ml/code/"
-TOPOLOGY_FILE_NAME = "node_to_spine.txt"
+TOPOLOGY_FILE_NAME = "node_to_spine0.txt"
 
-sm_training_env = json.loads(os.environ['SM_TRAINING_ENV'])
-is_master = sm_training_env.get("is_master")
-master_hostname = sm_training_env.get("master_hostname")
-my_host = os.environ['SM_CURRENT_HOST']
-hosts = json.loads(os.environ['SM_HOSTS'])
-hosts.sort()
+if os.environ.get("SM_TRAINING_ENV") is None:
+    TOPOLOGY_OUTPUT_DIRECTORY = "/fsx/users/viskaria/topology-aware-launcher/"
+else:
+    TOPOLOGY_OUTPUT_DIRECTORY = "/opt/ml/code/"
 
-def compute_topology_mapping():
+
+def get_hosts_info():
+    if os.environ.get("SM_TRAINING_ENV") is None:
+        slurm_jobid = 3017
+        with open(f"/nfs/node_alloc/{slurm_jobid}/hostlist.txt") as f:
+            hosts = [line.rstrip("\n") for line in f.readlines()]
+        hosts.sort()
+        my_host = subprocess.check_output(['hostname']).decode('utf-8').strip()
+    else:
+        hosts = json.loads(os.environ['SM_HOSTS'])
+        hosts.sort()
+        my_host = os.environ['SM_CURRENT_HOST']
+    return hosts, my_host
+
+
+def compute_topology_mapping(hosts, my_host):
+    master_hostname = hosts[0].strip()
+    is_master = my_host == master_hostname
     if is_master:
         runner = mpi_launcher_helper.MasterRunner(
-            user_entry_point="bin/multispine_latency_calculator", 
+            user_entry_point="/fsx/users/viskaria/topology-aware-launcher/src/bin/multispine_latency_calculator", 
             user_output_dir=TOPOLOGY_OUTPUT_DIRECTORY, 
             processes_per_host=1, 
             master_hostname=master_hostname, 
             hosts=hosts)
     else:
         runner = mpi_launcher_helper.WorkerRunner(
-            user_entry_point="bin/multispine_latency_calculator",
+            user_entry_point="/fsx/users/viskaria/topology-aware-launcher/src/bin/multispine_latency_calculator",
             processes_per_host=1,
             master_hostname=master_hostname,
             current_host=my_host
@@ -36,8 +50,8 @@ def compute_topology_mapping():
     runner.run()
 
 
-def read_spine_to_host():
-    compute_topology_mapping()
+def read_spine_to_host(hosts, my_host):
+    compute_topology_mapping(hosts, my_host)
     spine_to_host = {}
     filename = TOPOLOGY_OUTPUT_DIRECTORY + TOPOLOGY_FILE_NAME
     print(f'Reading topology mapping from file {filename}')
@@ -88,10 +102,10 @@ def construct_bad_ranking(pp_degree, dp_degree, dp_major, count, spine_to_host):
     return ranking
 
 
-def get_training_info(pp_degree, dp_degree, optimize_for_pp, dp_major, bad_placement):
-    spine_to_host, count = read_spine_to_host()
+def get_training_info(pp_degree, dp_degree, optimize_for_pp, dp_major, bad_placement, hosts, my_host):
+    print('get_training_info')
+    spine_to_host, count = read_spine_to_host(hosts, my_host)
     print(f'Output from topology compute: {spine_to_host} count: {count}')
-    my_host = os.environ['SM_CURRENT_HOST']
     if bad_placement:
         ranking = construct_bad_ranking(pp_degree, dp_degree, dp_major, count, spine_to_host)
     else:
@@ -103,6 +117,8 @@ def get_training_info(pp_degree, dp_degree, optimize_for_pp, dp_major, bad_place
 
 
 def launch_mpirun_training(entry_point, ranking, master_addr, training_args):
+    master_hostname = hosts[0].strip()
+    is_master = my_host == master_hostname
     if is_master:
         runner = mpi_launcher_helper.MasterRunner(
             user_entry_point=entry_point, 
@@ -123,7 +139,8 @@ def launch_mpirun_training(entry_point, ranking, master_addr, training_args):
 
 def launch_torchrun_training(entry_point, ranking, master_addr, training_args):
     count = len(ranking)
-    my_host = os.environ['SM_CURRENT_HOST']
+    # my_host = os.environ['SM_CURRENT_HOST']
+    print(f'my_host = {my_host}')
     rank = ranking.index(my_host)
     command = ['torchrun', f'--nnodes={count}', f'--node_rank={rank}',
                '--nproc_per_node=8', f'--rdzv_endpoint={master_addr}:29400',
@@ -138,8 +155,7 @@ def validate_args(args):
     if args.launcher != "mpirun" and args.launcher != "torchrun":
         print('Argument launcher set to unsupported value, defaulting to torchrun.')
 
-
-if __name__ == "__main__":
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--pp-degree', type=int, required=True)
     parser.add_argument('--dp-degree', type=int, required=True)
@@ -148,13 +164,19 @@ if __name__ == "__main__":
     parser.add_argument('--bad-placement', action='store_true')
     parser.add_argument('--entry-point', type=str, required=True)
     parser.add_argument('--launcher', type=str, required=True)
-    args, unknown = parser.parse_known_args()
+    return parser.parse_known_args()
+
+if __name__ == "__main__":
+    args, unknown = parse_args()
     print(f'unknown args: {unknown}')
+    hosts, my_host = get_hosts_info()
     ranking, master_addr = get_training_info(args.pp_degree,
                                              args.dp_degree,
                                              args.optimize_for_pp,
                                              args.dp_major,
-                                             args.bad_placement)
+                                             args.bad_placement,
+                                             hosts, 
+                                             my_host)
 
     if args.launcher == "mpirun":
         launch_mpirun_training(args.entry_point, ranking, master_addr, unknown)

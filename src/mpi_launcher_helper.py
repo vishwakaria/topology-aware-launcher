@@ -25,7 +25,10 @@ import gethostname
 import asyncio
 from asyncio.subprocess import PIPE
 
-# logger = logging.getLogger('sagemaker-training-toolkit')
+if os.environ.get("SM_TRAINING_ENV") is None:
+    SAGEMAKER_MODE = False
+else:
+    SAGEMAKER_MODE = True
 
 MPI_FINISHED_STATUS_FILE = "/tmp/done"
 
@@ -102,8 +105,12 @@ def _wait_orted_process_to_finish():  # type: () -> None
     print("Orted process found %s", orted)
     print("Waiting for orted process %s", orted)
     if orted is not None:
+        print('will wait')
         gone, alive = psutil.wait_procs(orted, callback=_on_terminate)
+        print("done waiting for procs")
         return gone, alive
+    else:
+        print("orted is null")
     return None, None
 
 def _orted_process():  # pylint: disable=inconsistent-return-statements
@@ -176,15 +183,18 @@ class MasterRunner():
         print(msg, self._hosts, host_list, self._processes_per_host, num_processes)
 
         command = [
-            "mpirun",
+            "/opt/amazon/openmpi/bin/mpirun",
             "--host",
             ",".join(host_list),
             "-np",
             str(num_processes),
             "--allow-run-as-root",
-            "-mca",
+            "--mca",
             "orte_abort_on_non_zero_status",
             "1",
+            "--mca", 
+            "btl_tcp_if_exclude", 
+            "lo,docker0", 
             "-x",
             "MASTER_ADDR=%s" % self._master_hostname,
         ]
@@ -241,20 +251,33 @@ def _start_sshd_daemon():  # type: () -> None
 
 
 def _can_connect(host, port=22):  # type: (str, int) -> bool
-    try:
-        print(f"Testing connection to host {host}")
-        client = paramiko.SSHClient()
-        client.load_system_host_keys()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, port=port)
+    # try:
+    #     print(f"Testing connection to host {host}")
+    #     client = paramiko.SSHClient()
+    #     client.load_system_host_keys()
+    #     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    #     client.connect(host, port=port)
+    #     print("Can connect to host %s", host)
+    #     return True
+    # except Exception as e:  # pylint: disable=broad-except
+    #     print(
+    #         "Connection failed with exception: \n %s. \
+    #          Can be ignored for worker when master completes and exits.",
+    #         str(e),
+    #     )
+    #     return False
+    # finally:
+    #     client.close()
+
+    ssh_command = f"ssh {host}"
+    ssh_process = subprocess.Popen(ssh_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    output, error = ssh_process.communicate()
+    # print(output.decode())
+    # print(error.decode())
+    if ssh_process.returncode == 0:
         print("Can connect to host %s", host)
         return True
-    except Exception as e:  # pylint: disable=broad-except
-        print(
-            "Connection failed with exception: \n %s. \
-             Can be ignored for worker when master completes and exits.",
-            str(e),
-        )
+    else:
+        print("Cannot connect to host %s", host)
         return False
-    finally:
-        client.close()
+
