@@ -251,29 +251,9 @@ def _start_sshd_daemon():  # type: () -> None
 
 
 def _can_connect(host, port=22):  # type: (str, int) -> bool
-    # try:
-    #     print(f"Testing connection to host {host}")
-    #     client = paramiko.SSHClient()
-    #     client.load_system_host_keys()
-    #     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    #     client.connect(host, port=port)
-    #     print("Can connect to host %s", host)
-    #     return True
-    # except Exception as e:  # pylint: disable=broad-except
-    #     print(
-    #         "Connection failed with exception: \n %s. \
-    #          Can be ignored for worker when master completes and exits.",
-    #         str(e),
-    #     )
-    #     return False
-    # finally:
-    #     client.close()
-
     ssh_command = f"ssh {host}"
     ssh_process = subprocess.Popen(ssh_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     output, error = ssh_process.communicate()
-    # print(output.decode())
-    # print(error.decode())
     if ssh_process.returncode == 0:
         print("Can connect to host %s", host)
         return True

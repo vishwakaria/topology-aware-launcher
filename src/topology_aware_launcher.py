@@ -9,6 +9,7 @@ import mpi_launcher_helper
 import psutil
 
 TOPOLOGY_FILE_NAME = "node_to_spine0.txt"
+LATENCY_CALCULATOR_EXE = "bin/multispine_latency_calculator"
 
 if os.environ.get("SM_TRAINING_ENV") is None:
     TOPOLOGY_OUTPUT_DIRECTORY = "/fsx/users/viskaria/topology-aware-launcher/"
@@ -33,16 +34,17 @@ def get_hosts_info():
 def compute_topology_mapping(hosts, my_host):
     master_hostname = hosts[0].strip()
     is_master = my_host == master_hostname
+    entry_point = TOPOLOGY_OUTPUT_DIRECTORY + LATENCY_CALCULATOR_EXE
     if is_master:
         runner = mpi_launcher_helper.MasterRunner(
-            user_entry_point="/fsx/users/viskaria/topology-aware-launcher/src/bin/multispine_latency_calculator", 
+            user_entry_point=entry_point, 
             user_output_dir=TOPOLOGY_OUTPUT_DIRECTORY, 
             processes_per_host=1, 
             master_hostname=master_hostname, 
             hosts=hosts)
     else:
         runner = mpi_launcher_helper.WorkerRunner(
-            user_entry_point="/fsx/users/viskaria/topology-aware-launcher/src/bin/multispine_latency_calculator",
+            user_entry_point=entry_point,
             processes_per_host=1,
             master_hostname=master_hostname,
             current_host=my_host
