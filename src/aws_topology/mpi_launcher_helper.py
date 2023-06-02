@@ -12,16 +12,10 @@
 # language governing permissions and limitations under the License.
 """This module contains functionality related to distributed training using
 MPI (Message Passing Interface)."""
-import argparse
-from inspect import getfile, isclass
-import json
-import logging
 import os
 import subprocess
 import time
-import paramiko
 import psutil
-import gethostname
 import asyncio
 from asyncio.subprocess import PIPE
 
@@ -105,9 +99,7 @@ def _wait_orted_process_to_finish():  # type: () -> None
     print("Orted process found %s", orted)
     print("Waiting for orted process %s", orted)
     if orted is not None:
-        print('will wait')
         gone, alive = psutil.wait_procs(orted, callback=_on_terminate)
-        print("done waiting for procs")
         return gone, alive
     else:
         print("orted is null")
@@ -142,7 +134,7 @@ class MasterRunner():
         num_processes=None,
         no_python=True
     ):
-        print('Init master worker')
+        print('Init master')
         self._user_entry_point = user_entry_point
         self._user_output_dir = user_output_dir
         self._processes_per_host = processes_per_host

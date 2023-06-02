@@ -1,2 +1,8 @@
 *.ipynb_checkpoints*
 node_to_spine*
+scripts/
+.vscode/
+*.egg-info/
+build/
+dist/
+
